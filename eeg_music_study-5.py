@@ -37,6 +37,7 @@ import mne
 # ─────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────
+sampling_rate  = 250
 cyton_in  = True
 width     = 1536
 height    = 864
@@ -53,7 +54,7 @@ session   = 1
 #   0:30–4:30  → MAIN     (240s, EEG saved, photosensor ON)
 #   4:30–5:00  → POST-REC (last 30s, EEG saved, photosensor ON)
 #   total task = 300s = 5 min exactly
-baseline_duration   = 120.0  # 2 min baseline (fixation, no task, no audio)
+baseline_duration   = 60.0  # 1 min baseline (fixation, no task, no audio)
 buffer_duration     =  10.0  # 10s buffer — audio starts, task not yet open, not saved
 total_task_duration = 300.0  # 5 min task block (participant plays Connections throughout)
 pre_rec_duration    =  30.0  # first 30s of task — EEG saved
@@ -64,6 +65,11 @@ solve_epoch_window  =  15.0  # ±15s around each solve keypress
 
 # Counterbalancing — Latin square, 3 conditions × 6 orderings
 COND_LABELS  = {'S': 'SILENCE', 'M': 'STUDY MUSIC', 'C': 'CONTROL MUSIC'}
+DISPLAY_LABELS = {
+    0: "Block 1",
+    1: "Block 2",
+    2: "Block 3"
+}
 LATIN_SQUARE = [
     ['S', 'M', 'C'],
     ['S', 'C', 'M'],
@@ -96,7 +102,6 @@ if cyton_in:
     from threading import Thread, Event
     from queue import Queue
 
-    sampling_rate  = 250
     CYTON_BOARD_ID = 0
     BAUD_RATE      = 115200
     ANALOGUE_MODE  = '/2'
@@ -192,6 +197,7 @@ for cond, path in AUDIO_FILES.items():
 eeg       = np.zeros((8, 0))
 aux       = np.zeros((3, 0))
 timestamp = np.zeros((0,))
+events = []
 
 pre_rec_epochs  = {}  # condition → filtered EEG array (30s)
 post_rec_epochs = {}  # condition → filtered EEG array (30s)
@@ -209,6 +215,21 @@ def drain_queue():
         aux       = np.concatenate((aux, aux_in), axis=1)
         timestamp = np.concatenate((timestamp, ts_in))
 
+def log_event(event_name, condition=None):
+    """Record an EEG event marker."""
+    if cyton_in:
+        drain_queue()
+
+    sample = eeg.shape[1]
+
+    events.append({
+        'sample': sample,
+        'event': event_name,
+        'condition': condition
+    })
+
+    print(f'[EVENT] {event_name} @ sample {sample}')
+
 def stop_all_audio():
     for player in audio_players.values():
         try:
@@ -224,7 +245,42 @@ def save_all():
     np.save(save_dir + 'post_rec_epochs.npy',  np.array(list(post_rec_epochs.items()), dtype=object))
     np.save(save_dir + 'solve_events.npy',     np.array(solve_events, dtype=object))
     np.save(save_dir + 'segment_log.npy',      np.array(segment_log,  dtype=object))
+    np.save(save_dir + 'events.npy', np.array(events, dtype=object))
     print(f'[Saved] → {save_dir}')
+    if cyton_in and eeg.shape[1] > 0:
+
+        ch_names = [f'EEG{i+1}' for i in range(eeg.shape[0])]
+        ch_types = ['eeg'] * eeg.shape[0]
+
+        info = mne.create_info(
+            ch_names=ch_names,
+            sfreq=sampling_rate,
+            ch_types=ch_types
+        )
+
+        raw = mne.io.RawArray(eeg, info)
+
+        if len(events) > 0:
+
+            event_samples = []
+            event_ids = {}
+
+            for idx, ev in enumerate(events):
+                event_ids[ev['event']] = idx + 1
+                event_samples.append([ev['sample'], 0, idx + 1])
+
+            event_array = np.array(event_samples)
+
+            raw.add_events(event_array, stim_channel=None)
+
+        set_path = os.path.join(save_dir, 'eeg_raw.set')
+
+        print('[Export] Saving EEGLAB file...')
+        mne.export.export_raw(
+            set_path,
+            raw,
+            fmt='eeglab'
+        )
 
 def quit_clean():
     stop_all_audio()
@@ -294,36 +350,51 @@ print(f'\n[Design] Subject {subject} | Condition order: {condition_order}')
 wait_for_space(
     f'EEG Music Study\n\n'
     f'Subject {subject}   Session {session}\n'
-    f'Condition order: {" → ".join(COND_LABELS[c] for c in condition_order)}\n\n'
+    f'3 experiment blocks will follow.\n\n'
     f'Press SPACE to begin.'
 )
 
 # ─────────────────────────────────────────────
 # MAIN LOOP — one iteration per condition (~7 min each)
 # ─────────────────────────────────────────────
+print('\n' + '='*55)
+print('[Baseline] 1 minute fixation')
+print('='*55)
+
+wait_for_space(
+    'Baseline recording\n\n'
+    'Please relax and look at the fixation cross.\n'
+    'Keep your eyes open.\n\n'
+    'Press SPACE to begin.'
+)
+
+log_event('baseline_start')
+b_start, b_end = run_fixation_phase(baseline_duration, 'BASELINE')
+log_event('baseline_end')
+
+segment_log.append({
+    'phase': 'baseline',
+    'condition': 'all',
+    'start': b_start,
+    'end': b_end
+})
+
 for i_cond, condition in enumerate(condition_order):
     label = COND_LABELS[condition]
     print(f'\n{"="*55}')
+    log_event('condition_start', condition)
     print(f'[Condition {i_cond+1}/3]  {label}')
     print(f'{"="*55}')
 
     # ── Condition start ──────────────────────────────────────────────────
-    wait_for_space(
-        f'Condition {i_cond+1} of 3:   {label}\n\n'
-        f'You will see a fixation cross for 2 minutes.\n'
-        f'Please relax and keep your eyes on the cross.\n\n'
-        f'Press SPACE to begin.'
-    )
+    display_label = DISPLAY_LABELS[i_cond]
 
-    # ── PHASE 1: 2-min BASELINE (no audio) ───────────────────────────────
-    b_start, b_end = run_fixation_phase(baseline_duration, 'BASELINE')
-    segment_log.append({'phase': 'baseline', 'condition': condition,
-                        'start': b_start, 'end': b_end})
 
     # ── Start audio ───────────────────────────────────────────────────────
     stop_all_audio()
     if condition in audio_players:
         audio_players[condition].play()
+        log_event('audio_start', condition)
         print(f'  [Audio] Playing: {AUDIO_FILES[condition]}')
     else:
         print('  [Audio] Silence — no playback')
@@ -334,7 +405,7 @@ for i_cond, condition in enumerate(condition_order):
     # the full 5-min task block begins immediately after.
 
     wait_for_space(
-        f'Condition: {label}\n\n'
+        f'{display_label}\n\n'
         f'Open the Connections game in your browser now.\n\n'
         f'Press SPACE each time you complete a puzzle category.\n\n'
         f'[Experimenter: confirm participant is on the Connections page]\n'
@@ -342,6 +413,7 @@ for i_cond, condition in enumerate(condition_order):
     )
 
     # ── BUFFER: 10s (audio playing, task open, not saved) ────────────────
+    log_event('buffer_start', condition)
     print('  [BUFFER] 10s — audio playing, not saved')
     buf_clock = core.Clock()
     while buf_clock.getTime() < buffer_duration:
@@ -364,6 +436,7 @@ for i_cond, condition in enumerate(condition_order):
     pre_start_sample  = None
     post_start_sample = None
 
+    log_event('task_block_start', condition)
     print(f'  [TASK BLOCK] 5 min starting — {label}')
 
     while block_clock.getTime() < total_task_duration:
@@ -377,6 +450,7 @@ for i_cond, condition in enumerate(condition_order):
             if pre_start_sample is None:
                 if cyton_in: drain_queue()
                 pre_start_sample = eeg.shape[1]
+                log_event('pre_rec_start', condition)
                 print(f'  [PRE-REC] Started — sample {pre_start_sample}')
         elif t < total_task_duration - post_rec_duration:
             sub_phase = 'TASK'
@@ -385,6 +459,7 @@ for i_cond, condition in enumerate(condition_order):
             if post_start_sample is None:
                 if cyton_in: drain_queue()
                 post_start_sample = eeg.shape[1]
+                log_event('post_rec_start', condition)
                 print(f'  [POST-REC] Started — sample {post_start_sample}')
 
         # Solve keypress — logged across all sub-phases
@@ -396,7 +471,8 @@ for i_cond, condition in enumerate(condition_order):
             solve_sample = eeg.shape[1]
             solve_count += 1
             epoch_start = max(0, solve_sample - int(solve_epoch_window * sampling_rate))
-            epoch_end   = solve_sample + int(solve_epoch_window * sampling_rate)
+            epoch_end = min(eeg.shape[1], solve_sample + int(solve_epoch_window * sampling_rate))
+            log_event('solve', condition)
             solve_events.append({
                 'condition':       condition,
                 'condition_index': i_cond,
