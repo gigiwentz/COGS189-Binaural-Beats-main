@@ -238,17 +238,105 @@ def stop_all_audio():
             pass
 
 def save_all():
+    # ── Sanitize before saving ────────────────────────────────────────────
+    # Casts all values to plain Python types so .npy files load anywhere
+    # without requiring psychopy. Without this, psychopy's Timestamp objects
+    # get pickled in and cause ModuleNotFoundError on machines without psychopy
+    # (e.g. DataHub, analysis computers).
+    def _clean_dict(d):
+        out = {}
+        for k, v in d.items():
+            if isinstance(v, bool):
+                out[k] = bool(v)
+            elif isinstance(v, (int, float, str)):
+                out[k] = v
+            else:
+                try:
+                    out[k] = int(v)
+                except (TypeError, ValueError):
+                    try:
+                        out[k] = float(v)
+                    except (TypeError, ValueError):
+                        out[k] = str(v)
+        return out
+
+    clean_solve_events = [_clean_dict(e) for e in solve_events]
+    clean_segment_log  = [_clean_dict(e) for e in segment_log]
+    clean_events       = [_clean_dict(e) for e in events]
+
+    # ── Save .npy files ───────────────────────────────────────────────────
     np.save(save_dir + 'eeg_raw.npy',         eeg)
     np.save(save_dir + 'aux_raw.npy',          aux)
     np.save(save_dir + 'timestamp_raw.npy',    timestamp)
     np.save(save_dir + 'pre_rec_epochs.npy',   np.array(list(pre_rec_epochs.items()),  dtype=object))
     np.save(save_dir + 'post_rec_epochs.npy',  np.array(list(post_rec_epochs.items()), dtype=object))
-    np.save(save_dir + 'solve_events.npy',     np.array(solve_events, dtype=object))
-    np.save(save_dir + 'segment_log.npy',      np.array(segment_log,  dtype=object))
-    np.save(save_dir + 'events.npy', np.array(events, dtype=object))
-    print(f'[Saved] → {save_dir}')
-    if cyton_in and eeg.shape[1] > 0:
+    np.save(save_dir + 'solve_events.npy',     np.array(clean_solve_events, dtype=object))
+    np.save(save_dir + 'segment_log.npy',      np.array(clean_segment_log,  dtype=object))
+    np.save(save_dir + 'events.npy',           np.array(clean_events,       dtype=object))
+    print(f'[Saved .npy] → {save_dir}')
 
+    # ── Save EEGLAB-importable CSV files ──────────────────────────────────
+    # These CSVs can be imported in EEGLAB via:
+    #   File → Import event info → from ASCII/CSV file
+    # 'latency' = sample number (EEGLAB's term for sample index)
+    # 'type'    = event name (EEGLAB's term for event label)
+
+    import csv
+
+    # 1. All events (condition markers, task start/end, solves)
+    events_csv_path = save_dir + 'events_eeglab.csv'
+    with open(events_csv_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['latency', 'type', 'condition'])
+        writer.writeheader()
+        for ev in clean_events:
+            writer.writerow({
+                'latency':   ev.get('sample', ''),
+                'type':      ev.get('event', ''),
+                'condition': ev.get('condition', ''),
+            })
+    print(f'[Saved CSV] events_eeglab.csv ({len(clean_events)} events)')
+
+    # 2. Solve keypresses only — for event-locked epoch extraction in EEGLAB
+    #    Use: EEGLAB → Tools → Extract Epochs, epoch around 'solve' events
+    solve_csv_path = save_dir + 'solve_events_eeglab.csv'
+    with open(solve_csv_path, 'w', newline='') as f:
+        fieldnames = ['latency', 'type', 'condition', 'condition_index',
+                      'solve_number', 'sub_phase', 'time_in_task',
+                      'epoch_start', 'epoch_end']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for ev in clean_solve_events:
+            writer.writerow({
+                'latency':         ev.get('eeg_sample', ''),
+                'type':            'solve',
+                'condition':       ev.get('condition', ''),
+                'condition_index': ev.get('condition_index', ''),
+                'solve_number':    ev.get('solve_number', ''),
+                'sub_phase':       ev.get('sub_phase', ''),
+                'time_in_task':    ev.get('time_in_task', ''),
+                'epoch_start':     ev.get('epoch_start', ''),
+                'epoch_end':       ev.get('epoch_end', ''),
+            })
+    print(f'[Saved CSV] solve_events_eeglab.csv ({len(clean_solve_events)} solves)')
+
+    # 3. Segment log — condition block boundaries, useful for manual review
+    segments_csv_path = save_dir + 'segment_log_eeglab.csv'
+    with open(segments_csv_path, 'w', newline='') as f:
+        fieldnames = ['latency', 'type', 'condition', 'end_sample', 'n_solves']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for seg in clean_segment_log:
+            writer.writerow({
+                'latency':   seg.get('start', ''),
+                'type':      seg.get('phase', ''),
+                'condition': seg.get('condition', ''),
+                'end_sample': seg.get('end', ''),
+                'n_solves':  seg.get('n_solves', ''),
+            })
+    print(f'[Saved CSV] segment_log_eeglab.csv ({len(clean_segment_log)} segments)')
+
+    # ── Save EEGLAB .set file ─────────────────────────────────────────────
+    if cyton_in and eeg.shape[1] > 0:
         ch_names = [f'EEG{i+1}' for i in range(eeg.shape[0])]
         ch_types = ['eeg'] * eeg.shape[0]
 
@@ -260,27 +348,23 @@ def save_all():
 
         raw = mne.io.RawArray(eeg, info)
 
-        if len(events) > 0:
-
+        if len(clean_events) > 0:
             event_samples = []
             event_ids = {}
-
-            for idx, ev in enumerate(events):
+            for idx, ev in enumerate(clean_events):
                 event_ids[ev['event']] = idx + 1
                 event_samples.append([ev['sample'], 0, idx + 1])
-
             event_array = np.array(event_samples)
-
             raw.add_events(event_array, stim_channel=None)
 
         set_path = os.path.join(save_dir, 'eeg_raw.set')
-
-        print('[Export] Saving EEGLAB file...')
+        print('[Export] Saving EEGLAB .set file...')
         mne.export.export_raw(
             set_path,
             raw,
             fmt='eeglab'
         )
+        print(f'[Saved .set] eeg_raw.set')
 
 def quit_clean():
     stop_all_audio()
