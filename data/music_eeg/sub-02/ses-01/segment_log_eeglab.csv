@@ -1,0 +1,11 @@
+latency,type,condition,end_sample,n_solves
+10222,baseline,all,25373,
+32467,pre_rec,S,39967,
+100043,post_rec,S,107543,
+32467,full_block,S,107618,2
+120003,pre_rec,C,127503,
+187580,post_rec,C,195080,
+120003,full_block,C,195155,2
+207660,pre_rec,M,215160,
+275357,post_rec,M,282857,
+207660,full_block,M,282812,1

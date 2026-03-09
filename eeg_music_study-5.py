@@ -41,7 +41,7 @@ sampling_rate  = 250
 cyton_in  = True
 width     = 1536
 height    = 864
-subject   = 1    # ← change per participant
+subject   = 2    # ← change per participant
 session   = 1
 
 # Timing (seconds)
