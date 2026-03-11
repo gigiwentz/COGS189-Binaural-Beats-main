@@ -1,0 +1,3 @@
+latency,type,condition,condition_index,solve_number,sub_phase,time_in_task,epoch_start,epoch_end
+94512,solve,S,0,1,TASK,197.41075099998852,90762,94512
+256839,solve,M,2,1,TASK,150.10805179999443,253089,256839
