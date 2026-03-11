@@ -1,0 +1,7 @@
+latency,type,condition
+15632,baseline_start,None
+30662,baseline_end,None
+30662,condition_start,S
+35713,buffer_start,S
+38238,task_block_start,S
+38238,pre_rec_start,S

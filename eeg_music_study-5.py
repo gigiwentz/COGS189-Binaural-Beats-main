@@ -42,7 +42,7 @@ cyton_in  = True
 width     = 1536
 height    = 864
 subject   = 2    # ← change per participant
-session   = 1
+session   = 2
 
 # Timing (seconds)
 # Per condition = 2 min baseline + 10s buffer + 5 min task = 7 min 10s
