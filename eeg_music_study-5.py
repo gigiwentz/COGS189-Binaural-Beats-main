@@ -54,7 +54,7 @@ session   = 1
 #   0:30–4:30  → MAIN     (240s, EEG saved, photosensor ON)
 #   4:30–5:00  → POST-REC (last 30s, EEG saved, photosensor ON)
 #   total task = 300s = 5 min exactly
-baseline_duration   = 60.0  # 1 min baseline (fixation, no task, no audio)
+baseline_duration   = 120.0  # 2 min baseline (fixation, no task, no audio)
 buffer_duration     =  10.0  # 10s buffer — audio starts, task not yet open, not saved
 total_task_duration = 300.0  # 5 min task block (participant plays Connections throughout)
 pre_rec_duration    =  30.0  # first 30s of task — EEG saved
@@ -390,18 +390,10 @@ for i_cond, condition in enumerate(condition_order):
     display_label = DISPLAY_LABELS[i_cond]
 
 
-    # ── Start audio ───────────────────────────────────────────────────────
-    stop_all_audio()
-    if condition in audio_players:
-        audio_players[condition].play()
-        log_event('audio_start', condition)
-        print(f'  [Audio] Playing: {AUDIO_FILES[condition]}')
-    else:
-        print('  [Audio] Silence — no playback')
 
     # ── PHASES 2–5: BUFFER then 5-min TASK BLOCK ─────────────────────────
     # Participant opens Connections before pressing SPACE.
-    # Audio is already playing. Buffer runs first (not saved), then
+    # SPACE pressed → audio starts → 10s buffer → task block begins
     # the full 5-min task block begins immediately after.
 
     wait_for_space(
@@ -411,6 +403,16 @@ for i_cond, condition in enumerate(condition_order):
         f'[Experimenter: confirm participant is on the Connections page]\n'
         f'Press SPACE to start.'
     )
+
+    stop_all_audio()
+    if condition in audio_players:
+        audio_players[condition].play()
+        log_event('audio_start', condition)
+        print(f'  [Audio] Playing: {AUDIO_FILES[condition]}')
+    else:
+        print('  [Audio] Silence — no playback')
+    
+    log_event('task_condition_start', condition)
 
     # ── BUFFER: 10s (audio playing, task open, not saved) ────────────────
     log_event('buffer_start', condition)
@@ -425,7 +427,7 @@ for i_cond, condition in enumerate(condition_order):
         window.flip()
         if cyton_in:
             drain_queue()
-
+    log_event('buffer_end', condition)
     # ── 5-MIN TASK BLOCK ──────────────────────────────────────────────────
     if cyton_in:
         drain_queue()
