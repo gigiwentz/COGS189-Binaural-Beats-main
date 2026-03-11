@@ -54,7 +54,7 @@ session   = 2
 #   0:30–4:30  → MAIN     (240s, EEG saved, photosensor ON)
 #   4:30–5:00  → POST-REC (last 30s, EEG saved, photosensor ON)
 #   total task = 300s = 5 min exactly
-baseline_duration   = 60.0  # 1 min baseline (fixation, no task, no audio)
+baseline_duration   = 120.0  # 2 min baseline (fixation, no task, no audio)
 buffer_duration     =  10.0  # 10s buffer — audio starts, task not yet open, not saved
 total_task_duration = 300.0  # 5 min task block (participant plays Connections throughout)
 pre_rec_duration    =  30.0  # first 30s of task — EEG saved
