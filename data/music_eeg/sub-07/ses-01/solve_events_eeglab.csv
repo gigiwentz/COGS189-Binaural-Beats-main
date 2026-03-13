@@ -1,0 +1,4 @@
+latency,type,condition,condition_index,solve_number,sub_phase,time_in_task,epoch_start,epoch_end
+89100,solve,S,0,1,TASK,167.02574710000772,85350,89100
+103890,solve,S,0,2,TASK,226.14551719999872,100140,103890
+204773,solve,M,1,1,POST-REC,287.64884380000876,201023,204773
